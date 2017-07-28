@@ -57,6 +57,10 @@ import * as sjcl from 'sjcl';
 export interface CompilerOptions {
   addTypename?: boolean;
   mergeInFieldsFromFragmentSpreads?: boolean;
+  passthroughCustomScalars?: boolean;
+  customScalarsPrefix?: string;
+  namespace?: string;
+  generateOperationIds?: boolean;
 }
 
 export interface CompilationContext {
@@ -64,9 +68,7 @@ export interface CompilationContext {
   operations: { [operationName: string]: CompiledOperation };
   fragments: { [fragmentName: string]: CompiledFragment };
   typesUsed: GraphQLType[];
-  passthroughCustomScalars?: boolean;
-  customScalarsPrefix?: string;
-  namespace?: string;
+  options: CompilerOptions
 }
 
 export interface CompiledOperation {
@@ -175,7 +177,7 @@ export function compileToIR(
 
   const typesUsed = compiler.typesUsed;
 
-  return { schema, operations, fragments, typesUsed };
+  return { schema, operations, fragments, typesUsed, options };
 }
 
 export class Compiler {
