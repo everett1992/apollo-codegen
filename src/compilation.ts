@@ -129,12 +129,12 @@ export interface Argument {
   value: any;
 }
 
-type GroupedFieldSet = { [responseName: string]: FieldSet };
+type GroupedFieldSet = Map<string, FieldSet>;
 type FieldSet = [GraphQLCompositeType, Field][];
 
-type VisitedFragmentSet = { [fragmentName: string]: boolean };
+type VisitedFragmentSet = Set<string>;
 type GroupedVisitedFragmentSet = Map<GraphQLCompositeType, VisitedFragmentSet>;
-type FragmentsReferencedSet = { [fragmentName: string]: boolean };
+type FragmentsReferencedSet = Set<string>;
 
 // Parts of this code are adapted from graphql-js
 
@@ -185,8 +185,8 @@ export class Compiler {
   schema: GraphQLSchema;
   typesUsedSet: Set<GraphQLType>;
   operations: OperationDefinitionNode[];
-  fragmentMap: { [name: string]: FragmentDefinitionNode };
-  compiledFragmentMap: { [name: string]: CompiledFragment };
+  fragmentMap: Map<string, FragmentDefinitionNode>;
+  compiledFragmentMap: Map<string, CompiledFragment>;
 
   constructor(
     schema: GraphQLSchema,
@@ -198,7 +198,7 @@ export class Compiler {
 
     this.typesUsedSet = new Set();
 
-    this.fragmentMap = Object.create(null);
+    this.fragmentMap = new Map();
     this.operations = [];
 
     for (const definition of document.definitions) {
@@ -207,12 +207,12 @@ export class Compiler {
           this.operations.push(definition);
           break;
         case Kind.FRAGMENT_DEFINITION:
-          this.fragmentMap[definition.name.value] = definition;
+          this.fragmentMap.set(definition.name.value, definition);
           break;
       }
     }
 
-    this.compiledFragmentMap = Object.create(null);
+    this.compiledFragmentMap = new Map();
   }
 
   addTypeUsed(type: GraphQLType) {
@@ -236,12 +236,12 @@ export class Compiler {
     return Array.from(this.typesUsedSet);
   }
 
-  fragmentNamed(fragmentName: string): FragmentDefinitionNode {
-    return this.fragmentMap[fragmentName];
+  fragmentNamed(fragmentName: string): FragmentDefinitionNode | undefined {
+    return this.fragmentMap.get(fragmentName);
   }
 
   get fragments(): FragmentDefinitionNode[] {
-    return Object.values(this.fragmentMap);
+    return Array.from(this.fragmentMap.values());
   }
 
   compileOperation(
@@ -274,14 +274,14 @@ export class Compiler {
       groupedVisitedFragmentSet
     );
 
-    const fragmentsReferencedSet = Object.create(null);
+    const fragmentsReferencedSet = new Set();
     const { fields } = this.resolveFields(
       rootType,
       groupedFieldSet,
       groupedVisitedFragmentSet,
       fragmentsReferencedSet
     );
-    const fragmentsReferenced = Object.keys(fragmentsReferencedSet);
+    const fragmentsReferenced = Array.from(fragmentsReferencedSet.keys());
 
     return {
       filePath,
@@ -317,14 +317,14 @@ export class Compiler {
       groupedVisitedFragmentSet
     );
 
-    const fragmentsReferencedSet = Object.create(null);
+    const fragmentsReferencedSet = new Set();
     const { fields, fragmentSpreads, inlineFragments } = this.resolveFields(
       typeCondition,
       groupedFieldSet,
       groupedVisitedFragmentSet,
       fragmentsReferencedSet
     );
-    const fragmentsReferenced = Object.keys(fragmentsReferencedSet);
+    const fragmentsReferenced = Array.from(fragmentsReferencedSet.keys());
 
     return {
       filePath,
@@ -342,7 +342,7 @@ export class Compiler {
   collectFields(
     parentType: GraphQLCompositeType,
     selectionSet: SelectionSetNode,
-    groupedFieldSet: GroupedFieldSet = Object.create(null),
+    groupedFieldSet: GroupedFieldSet = new Map(),
     groupedVisitedFragmentSet: GroupedVisitedFragmentSet = new Map()
   ): GroupedFieldSet {
     if (!isCompositeType(parentType)) {
@@ -370,11 +370,13 @@ export class Compiler {
           }
 
           if (groupedFieldSet) {
-            if (!groupedFieldSet[responseName]) {
-              groupedFieldSet[responseName] = [];
+            let fieldSet = groupedFieldSet.get(responseName);
+            if (!fieldSet) {
+              fieldSet = [];
+              groupedFieldSet.set(responseName, fieldSet);
             }
 
-            groupedFieldSet[responseName].push([
+            fieldSet.push([
               parentType,
               {
                 responseName,
@@ -427,12 +429,12 @@ export class Compiler {
           if (groupedVisitedFragmentSet) {
             let visitedFragmentSet = groupedVisitedFragmentSet.get(parentType);
             if (!visitedFragmentSet) {
-              visitedFragmentSet = {};
+              visitedFragmentSet = new Set();
               groupedVisitedFragmentSet.set(parentType, visitedFragmentSet);
             }
 
-            if (visitedFragmentSet[fragmentName]) continue;
-            visitedFragmentSet[fragmentName] = true;
+            if (visitedFragmentSet.has(fragmentName)) continue;
+            visitedFragmentSet.add(fragmentName);
           }
 
           if (!doTypesOverlap(this.schema, fragmentType, parentType)) continue;
@@ -468,7 +470,7 @@ export class Compiler {
     fieldSet: FieldSet,
     groupedVisitedFragmentSet: GroupedVisitedFragmentSet
   ): GroupedFieldSet {
-    const groupedFieldSet = Object.create(null);
+    const groupedFieldSet = new Map();
 
     for (const [, field] of fieldSet) {
       const selectionSet = field.selectionSet;
@@ -498,7 +500,7 @@ export class Compiler {
   } {
     const fields = [];
 
-    for (let [responseName, fieldSet] of Object.entries(groupedFieldSet)) {
+    for (let [responseName, fieldSet] of groupedFieldSet.entries()) {
       fieldSet = fieldSet.filter(([typeCondition]) =>
         isTypeSubTypeOf(this.schema, parentType, typeCondition)
       );
@@ -581,10 +583,11 @@ export class Compiler {
     );
 
     if (fragmentsReferencedSet) {
-      Object.assign(
-        fragmentsReferencedSet,
-        ...groupedVisitedFragmentSet.values()
-      );
+      for (const visitedFragmentSet of groupedVisitedFragmentSet.values()) {
+        for (const visitedFragment of visitedFragmentSet) {
+          fragmentsReferencedSet.add(visitedFragment);
+        }
+      }
 
       // TODO: This is a really inefficient way of keeping track of fragments referenced by other fragments
       // We need to either cache compiled fragments or find a way to make resolveFields smarter
@@ -596,7 +599,7 @@ export class Compiler {
           fragmentsReferenced: fragmentsReferencedFromFragment
         } = this.compileFragment(fragment);
         for (let fragmentReferenced of fragmentsReferencedFromFragment) {
-          fragmentsReferencedSet[fragmentReferenced] = true;
+          fragmentsReferencedSet.add(fragmentReferenced);
         }
       }
     }
@@ -635,7 +638,7 @@ export class Compiler {
 
     const possibleTypes = new Set<GraphQLObjectType>();
 
-    for (const fieldSet of Object.values(groupedFieldSet)) {
+    for (const fieldSet of groupedFieldSet.values()) {
       for (const [typeCondition] of fieldSet) {
         if (
           typeCondition instanceof GraphQLObjectType &&
@@ -676,7 +679,7 @@ export class Compiler {
       if (!isTypeProperSuperTypeOf(this.schema, effectiveType, parentType))
         continue;
 
-      for (const fragmentName of Object.keys(visitedFragmentSet)) {
+      for (const fragmentName of visitedFragmentSet.keys()) {
         fragmentSpreads.add(fragmentName);
       }
     }
