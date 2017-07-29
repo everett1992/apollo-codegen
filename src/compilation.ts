@@ -50,8 +50,6 @@ import {
 
 import { join, block, wrap, indent } from './utilities/printing';
 
-import { flatMap, uniqBy } from 'lodash';
-
 import * as sjcl from 'sjcl';
 
 export interface CompilerOptions {
